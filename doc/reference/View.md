@@ -81,9 +81,15 @@ Add filters to the list. Each field maps a property in the API endpoint result.
             nga.field('age', 'number')
         ]);
 
-    Filters appear when the user clicks on the "Add filter" button at the top of the list. Once the user fills the filter widgets, the list is immediately refreshed based on the filter values, with unerlying API requests looking like:
+    Filters appear when the user clicks on the "Add filter" button at the top of the list. Once the user fills the filter widgets, the list is immediately refreshed based on the filter values, with underlying API requests looking like:
 
-        GET /customers?first_name=XXX&last_name=XXX&age=XXX
+        GET /customers?_filters=%7B%22first_name%22%3A%22XXX%22%2C%22last_name%22%3A%22XXX%22%2C%22age%22%3A%22XXX%22%7D
+
+    Which is the urlencoded version for:
+
+        GET /customers?_filters={"first_name":"XXX","last_name":"XXX","age":"XXX"}
+
+    **Tip**: You can customize how filters translate to API request parameters. See the [API Mapping chapter](../API-mapping.md) for details.
 
     You can also set a filter field as "pinned", to make it always visible.
 
@@ -168,6 +174,33 @@ Set the fields for the CSV export function. By default, ng-admin uses the fields
                 .stripTags(true)
         ]);
 
+Be careful if you don't define explicitly your `exportFields` (and so the fields displayed in the datagrid will be used) you may have strange results with fields of type `template`!    
+For example, if you define:
+
+    nga.field('picture', 'template')
+        .template('<img src="{{ entry.values.picture }}" />')
+
+The exported value will be :
+
+    <img src="{{ entry.values.picture }}" />
+
+To fix that, you have to set your `.template` with a function :
+
+    nga.field('picture', 'template')
+        .template((entry) => `<img src="${entry.values.picture}" />`)
+
+In this case, the exported value will be :
+
+    <img src="http://mydomain.com/myPicture.png" />
+
+* `exportOptions(Object)`
+Customize the CSV export format (quotes, delimiter, newline). The default options object is `{ quotes: false, delimiter: ",", newline: "\r\n" }`.
+
+        listView.exportOptions({
+            quotes: true,
+            delimiter: ';'
+        });
+
 * `prepare(Function)`
 Add a function to be executed before the view renders.
 
@@ -204,3 +237,65 @@ A list of CSS classes to be added to the rows of the datagrid. If you provide a 
             .entryCssClasses(function(entry) {
                 return (entry.views > 300) ? 'is-popular' : '';
             });
+
+## editionView and creationView Settings
+
+* `onSubmitSuccess(Array|Function)`
+Add a function to be executed after the update succeeds.
+
+    This is the ideal place to use the response to update the entry, or redirect to another view. If the function returns false, the default execution workflow is stopped. This means that the function must provide a custom workflow. If the function throws an exception, the onSubmitError callback will execute.
+
+    The function argument can be an angular injectable, listing required dependencies in an array. Among other, the function can receive the following services:
+
+    - `$event`: the form submission event
+    - `entry`: the current Entry instance
+    - `entity`: the current entity
+    - `form`: the form object (for form validation and errors)
+    - `progression`: the controller for the loading indicator
+    - `notification`: the controller for top notifications
+
+    The function can be asynchronous, in which case it should return a Promise.
+
+        post.editionView().onSubmitSuccess(['progression', 'notification', '$state', 'entry', 'entity', function(progression, notification, $state, entry, entity) {
+            // stop the progress bar
+            progression.done();
+            // add a notification
+            notification.log(`Element #${entry._identifierValue} successfully edited.`, { addnCls: 'humane-flatty-success' });
+            // redirect to the list view
+            $state.go($state.get('list'), { entity: entity.name() });
+            // cancel the default action (redirect to the edition view)
+            return false;
+        }])
+
+* `onSubmitError(Array|Function)`
+Add a function to be executed after the update request receives a failed http response from the server.
+
+    This is the ideal place to use the response to update the entry, display server-side validation error, or redirect to another view. If the function returns false, the default execution workflow is stopped. This means that the function must provide a custom workflow. The syntax depends on the framework calling the function.
+
+    The function argument can be an angular injectable, listing required dependencies in an array. Among other, the function can receive the following services:
+
+    - `$event`: the form submission event
+    - `error`: the response from the server
+    - `errorMessage`: the error message based on the response
+    - `entry`: the current Entry instance
+    - `entity`: the current entity
+    - `form`: the form object (for form validation and errors)
+    - `progression`: the controller for the loading indicator
+    - `notification`: the controller for top notifications
+
+    The function can be asynchronous, in which case it should return a Promise.
+
+        post.editionView().onSubmitError(['error', 'form', 'progression', 'notification', function(error, form, progression, notification) {
+            // mark fields based on errors from the response
+            error.violations.forEach(violation => {
+                if (form[violation.propertyPath]) {
+                    form[violation.propertyPath].$valid = false;
+                }
+            });
+            // stop the progress bar
+            progression.done();
+            // add a notification
+            notification.log(`Some values are invalid, see details in the form`, { addnCls: 'humane-flatty-error' });
+            // cancel the default action (default error messages)
+            return false;
+        }]);
